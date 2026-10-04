@@ -156,6 +156,38 @@ def calculate_indicators(df: pd.DataFrame) -> dict:
     change_5d = float((close.iloc[-1] / close.iloc[-6] - 1) * 100) if len(close) > 5 else 0
     change_20d = float((close.iloc[-1] / close.iloc[-21] - 1) * 100) if len(close) > 20 else 0
 
+    # ===== ATR (untuk Stop Loss & Take Profit) =====
+    tr1 = high - low
+    tr2 = abs(high - close.shift(1))
+    tr3 = abs(low - close.shift(1))
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = float(tr.rolling(14).mean().iloc[-1]) if len(tr) >= 14 else float(tr.mean())
+
+    # ===== Support & Resistance sederhana (20 hari terakhir) =====
+    lookback = min(20, len(high))
+    recent_high = float(high.iloc[-lookback:].max())
+    recent_low = float(low.iloc[-lookback:].min())
+    # Pivot-style
+    resistance = recent_high
+    support = recent_low
+
+    # Entry zone (dekat support jika uptrend, atau area tengah)
+    if price > sma20:
+        entry_low = max(support, price * 0.985)
+        entry_high = price * 1.005
+    else:
+        entry_low = support
+        entry_high = (support + resistance) / 2
+
+    # Stop Loss & Take Profit suggestion
+    stop_loss = price - (1.5 * atr)
+    take_profit_1 = price + (2.0 * atr)   # RR 1:1.3
+    take_profit_2 = price + (3.0 * atr)   # RR lebih besar
+
+    # Pastikan SL tidak di bawah support terlalu jauh
+    if stop_loss < support * 0.98:
+        stop_loss = support * 0.98
+
     return {
         "price": price,
         "rsi": float(rsi) if not np.isnan(rsi) else 50.0,
@@ -171,6 +203,14 @@ def calculate_indicators(df: pd.DataFrame) -> dict:
         "change_20d": change_20d,
         "close": float(close.iloc[-1]),
         "prev_close": float(close.iloc[-2]) if len(close) > 1 else float(close.iloc[-1]),
+        "atr": atr,
+        "support": support,
+        "resistance": resistance,
+        "entry_low": entry_low,
+        "entry_high": entry_high,
+        "stop_loss": stop_loss,
+        "tp1": take_profit_1,
+        "tp2": take_profit_2,
     }
 
 def ai_score(tech: dict, fund: dict) -> int:
@@ -324,6 +364,38 @@ def score_color(score: int) -> str:
     else:
         return "⚪"
 
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_ihsg_trend():
+    """Cek tren IHSG sederhana"""
+    try:
+        df = yf.download("^JKSE", period="3mo", progress=False, auto_adjust=True)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        if df.empty or len(df) < 30:
+            return {"status": "Unknown", "change_5d": 0, "above_ma": True}
+        close = df["Close"].astype(float)
+        sma20 = close.rolling(20).mean().iloc[-1]
+        sma50 = close.rolling(50).mean().iloc[-1] if len(close) >= 50 else sma20
+        price = close.iloc[-1]
+        change_5d = float((close.iloc[-1] / close.iloc[-6] - 1) * 100) if len(close) > 5 else 0
+
+        if price > sma20 > sma50 and change_5d > 0:
+            status = "Bullish"
+        elif price < sma20 < sma50 and change_5d < 0:
+            status = "Bearish"
+        else:
+            status = "Sideways"
+
+        return {
+            "status": status,
+            "change_5d": change_5d,
+            "above_ma": price > sma20,
+            "price": float(price)
+        }
+    except Exception:
+        return {"status": "Unknown", "change_5d": 0, "above_ma": True, "price": 0}
+
 # ====================== UI ======================
 st.title("📈 AimnismeSaham")
 st.caption(f"AI Stock Screener IDX (±130 saham likuid)  •  Update: {datetime.now().strftime('%d %b %Y • %H:%M')} WIB  •  Data: Yahoo Finance  •  Bukan saran investasi")
@@ -334,21 +406,17 @@ with st.sidebar:
     min_score = st.slider("Skor AI minimum", 0, 100, 60, 1)
     min_smart = st.slider("Smart Money Score minimum", 0, 100, 50, 1)
     only_uptrend = st.checkbox("Hanya yang di atas SMA20", value=True)
-    max_show = st.slider("Jumlah saham ditampilkan", 5, 40, 15)
+    respect_ihsg = st.checkbox("Hormati tren IHSG (hindari jika Bearish)", value=True)
+    max_show = st.slider("Jumlah saham ditampilkan", 5, 40, 12)
     st.markdown("---")
     st.markdown("**Keterangan Skor**")
     st.markdown("""
-    **Skor AI**  
-    - 80–100 → Sangat menarik  
-    - 70–79 → Menarik  
-    
-    **Smart Money Score** (Proxy Bandar)  
-    - 80+ → Indikasi kuat aktivitas besar  
-    - 60–79 → Ada aktivitas volume  
-    - <60 → Volume sepi  
+    **Skor AI** : Teknikal + Fundamental  
+    **Smart $** : Proxy volume / smart money  
+    **SL / TP** : Berdasarkan ATR  
     """)
     st.markdown("---")
-    st.caption("Teknikal + Fundamental + Volume Analysis")
+    st.caption("Support • Resistance • Entry Zone • SL/TP")
 
 # ====================== TOMBOL SCAN YANG JELAS ======================
 st.markdown("---")
@@ -365,6 +433,12 @@ scan = st.button(
 st.caption("Proses scan membutuhkan 30–60 detik. Mohon tunggu sampai selesai.")
 
 if scan:
+    # Cek tren IHSG dulu
+    ihsg = get_ihsg_trend()
+    
+    if respect_ihsg and ihsg["status"] == "Bearish":
+        st.warning(f"⚠️ **IHSG sedang Bearish** (5D: {ihsg['change_5d']:+.1f}%). Rekomendasi dibatasi. Pertimbangkan tunggu market membaik.")
+    
     results = []
     progress = st.progress(0)
     status = st.empty()
@@ -394,23 +468,30 @@ if scan:
         if only_uptrend and tech["price"] < tech["sma20"]:
             progress.progress((i + 1) / total)
             continue
+        # Jika IHSG bearish dan user aktifkan filter, naikkan standar skor
+        if respect_ihsg and ihsg["status"] == "Bearish" and score < 75:
+            progress.progress((i + 1) / total)
+            continue
 
         results.append({
             "Kode": kode,
-            "Nama": fund["name"][:28],
+            "Nama": fund["name"][:22],
             "Harga": tech["price"],
             "1D%": tech["change_1d"],
             "5D%": tech["change_5d"],
             "RSI": tech["rsi"],
             "Vol": tech["vol_ratio"],
-            "PE": fund["pe"],
-            "PBV": fund["pb"],
             "Skor AI": score,
             "Smart $": smart,
-            "Sektor": (fund["sector"] or "-")[:18],
+            "Support": tech["support"],
+            "Resistance": tech["resistance"],
+            "Entry": f"{tech['entry_low']:.0f}-{tech['entry_high']:.0f}",
+            "SL": tech["stop_loss"],
+            "TP1": tech["tp1"],
+            "TP2": tech["tp2"],
         })
         progress.progress((i + 1) / total)
-        time.sleep(0.12)
+        time.sleep(0.10)
 
     status.empty()
     progress.empty()
@@ -422,9 +503,13 @@ if scan:
         df = df.sort_values("Skor AI", ascending=False).head(max_show).reset_index(drop=True)
 
         # Tampilkan top 3 highlight
+        # Status IHSG
+        ihsg_icon = "🟢" if ihsg["status"] == "Bullish" else ("🔴" if ihsg["status"] == "Bearish" else "🟡")
+        st.info(f"{ihsg_icon} **IHSG**: {ihsg['status']} | 5D: {ihsg['change_5d']:+.1f}%")
+
         st.success(f"✅ Scan selesai! Ditemukan **{len(df)} saham** potensial.")
         st.markdown("### 🏆 Rekomendasi Saham Potensial")
-        st.caption("Urut berdasarkan Skor AI + mempertimbangkan Smart Money Score")
+        st.caption("Urut berdasarkan Skor AI • Dilengkapi Entry Zone, SL & TP")
         
         top_cols = st.columns(min(3, len(df)))
         for idx, col in enumerate(top_cols):
@@ -434,11 +519,13 @@ if scan:
                     st.metric(
                         label=f"{score_color(row['Skor AI'])} {row['Kode']}",
                         value=f"{row['Harga']:,.0f}",
-                        delta=f"{row['5D%']:+.1f}% | AI:{row['Skor AI']} | SM:{row['Smart $']}"
+                        delta=f"AI:{row['Skor AI']} | SM:{row['Smart $']}"
                     )
+                    st.caption(f"Entry: {row['Entry']}")
+                    st.caption(f"SL: {row['SL']:,.0f} | TP1: {row['TP1']:,.0f}")
 
         st.markdown("---")
-        st.markdown(f"### 📋 Daftar Lengkap Hasil Screening ({len(df)} saham)")
+        st.markdown(f"### 📋 Daftar Lengkap + Level Trading ({len(df)} saham)")
 
         # Format tabel
         display = df.copy()
@@ -447,10 +534,13 @@ if scan:
         display["5D%"] = display["5D%"].map(lambda x: f"{x:+.2f}")
         display["RSI"] = display["RSI"].map(lambda x: f"{x:.1f}")
         display["Vol"] = display["Vol"].map(lambda x: f"{x:.2f}x")
-        display["PE"] = display["PE"].map(lambda x: f"{x:.1f}" if pd.notna(x) else "–")
-        display["PBV"] = display["PBV"].map(lambda x: f"{x:.2f}" if pd.notna(x) else "–")
         display["Skor AI"] = display["Skor AI"].map(lambda x: f"{score_color(x)} {x}")
         display["Smart $"] = display["Smart $"].map(lambda x: f"{score_color(x)} {x}")
+        display["Support"] = display["Support"].map(lambda x: f"{x:,.0f}")
+        display["Resistance"] = display["Resistance"].map(lambda x: f"{x:,.0f}")
+        display["SL"] = display["SL"].map(lambda x: f"{x:,.0f}")
+        display["TP1"] = display["TP1"].map(lambda x: f"{x:,.0f}")
+        display["TP2"] = display["TP2"].map(lambda x: f"{x:,.0f}")
 
         st.dataframe(
             display,
@@ -459,8 +549,9 @@ if scan:
             column_config={
                 "Kode": st.column_config.TextColumn("Kode", width="small"),
                 "Nama": st.column_config.TextColumn("Nama", width="medium"),
-                "Skor AI": st.column_config.TextColumn("Skor AI", width="small"),
-                "Smart $": st.column_config.TextColumn("Smart $", width="small"),
+                "Skor AI": st.column_config.TextColumn("AI", width="small"),
+                "Smart $": st.column_config.TextColumn("SM", width="small"),
+                "Entry": st.column_config.TextColumn("Entry Zone", width="small"),
             }
         )
 
@@ -477,17 +568,19 @@ if scan:
 else:
     st.info("👆 Tekan tombol **🚀 SCAN SAHAM SEKARANG** di atas untuk memulai.")
     st.markdown("""
-    ### Cara kerja AimnismeSaham
-    1. Ambil data harga 6 bulan terakhir  
-    2. Hitung indikator teknikal (RSI, MACD, SMA, Volume)  
-    3. Ambil data fundamental (PE, PBV, ROE)  
-    4. Hitung **Skor AI** + **Smart Money Score** (proxy bandarmologi)  
-    5. Tampilkan saham dengan skor tertinggi
+    ### Fitur AimnismeSaham Sekarang
+    1. **Skor AI** (Teknikal + Fundamental)
+    2. **Smart Money Score** (proxy volume / bandar)
+    3. **Support & Resistance** + Entry Zone
+    4. **Stop Loss & Take Profit** (berdasarkan ATR)
+    5. **Filter tren IHSG** (hindari open saat market bearish)
 
-    **Tips:**
-    - Jalankan setelah jam **16:00 WIB**
-    - Skor AI **80+** + Smart Money **70+** = lebih menarik
-    - Smart Money Score = indikasi aktivitas volume besar (bukan data broker asli)
+    **Cara pakai terbaik:**
+    - Scan setelah jam 16:00 WIB
+    - Pilih saham Skor AI ≥ 80 + Smart Money ≥ 70
+    - Entry di zona yang disarankan
+    - Pasang SL sesuai saran
+    - Jangan force open kalau IHSG sedang Bearish
     """)
 
 st.markdown("---")
