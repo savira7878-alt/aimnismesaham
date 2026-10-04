@@ -278,12 +278,19 @@ with st.sidebar:
     st.markdown("---")
     st.caption("Teknikal: RSI, MACD, MA, Volume, Momentum\nFundamental: PE, PBV, ROE")
 
-# Tombol scan
-col1, col2 = st.columns([3, 1])
-with col1:
-    scan = st.button("🔄  SCAN SEKARANG", type="primary", use_container_width=True)
-with col2:
-    st.write("")  # spacer
+# ====================== TOMBOL SCAN YANG JELAS ======================
+st.markdown("---")
+st.markdown("### 🔍 Cari Saham Potensial Hari Ini")
+st.markdown("Tekan tombol di bawah untuk memulai screening saham berdasarkan **Teknikal + Fundamental + Skor AI**")
+
+scan = st.button(
+    "🚀  SCAN SAHAM SEKARANG",
+    type="primary",
+    use_container_width=True,
+    help="Klik untuk memulai analisa seluruh saham"
+)
+
+st.caption("Proses scan membutuhkan 30–60 detik. Mohon tunggu sampai selesai.")
 
 if scan:
     results = []
@@ -338,7 +345,10 @@ if scan:
         df = df.sort_values("Skor", ascending=False).head(max_show).reset_index(drop=True)
 
         # Tampilkan top 3 highlight
-        st.subheader("🏆 Top Picks")
+        st.success(f"✅ Scan selesai! Ditemukan **{len(df)} saham** potensial.")
+        st.markdown("### 🏆 Rekomendasi Saham Potensial (Skor AI Tertinggi)")
+        st.caption("Semakin tinggi skor = semakin menarik secara teknikal & fundamental saat ini")
+        
         top_cols = st.columns(min(3, len(df)))
         for idx, col in enumerate(top_cols):
             if idx < len(df):
@@ -351,7 +361,7 @@ if scan:
                     )
 
         st.markdown("---")
-        st.subheader(f"📋 Hasil Screening ({len(df)} saham)")
+        st.markdown(f"### 📋 Daftar Lengkap Hasil Screening ({len(df)} saham)")
 
         # Format tabel
         display = df.copy()
@@ -386,18 +396,19 @@ if scan:
         )
 
 else:
-    st.info("👆 Tekan tombol **SCAN SEKARANG** untuk mulai screening saham.")
+    st.info("👆 Tekan tombol **🚀 SCAN SAHAM SEKARANG** di atas untuk memulai.")
     st.markdown("""
-    ### Cara kerja aplikasi ini
-    1. Mengambil data harga 6 bulan terakhir dari Yahoo Finance
-    2. Menghitung indikator teknikal (RSI, MACD, SMA, Volume)
-    3. Mengambil data fundamental sederhana (PE, PBV, ROE)
-    4. Memberikan **Skor AI 0–100** berdasarkan kombinasi keduanya
-    5. Menampilkan saham dengan skor tertinggi
+    ### Cara kerja AimnismeSaham
+    1. Mengambil data harga 6 bulan terakhir dari Yahoo Finance  
+    2. Menghitung indikator teknikal (RSI, MACD, SMA, Volume)  
+    3. Mengambil data fundamental (PE, PBV, ROE)  
+    4. Memberikan **Skor AI 0–100**  
+    5. Menampilkan saham dengan skor tertinggi sebagai **Rekomendasi**
 
     **Tips:**
-    - Jalankan setiap hari setelah jam 16:00 WIB untuk data penutupan
-    - Skor tinggi tidak berarti wajib beli — selalu lakukan analisa sendiri
+    - Jalankan setelah jam **16:00 WIB** (setelah market tutup)
+    - Skor **80+** = menarik | **90+** = sangat menarik
+    - Ini tool bantu analisa, **bukan** jaminan naik
     """)
 
 st.markdown("---")
