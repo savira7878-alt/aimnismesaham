@@ -152,6 +152,8 @@ def calculate_indicators(df: pd.DataFrame) -> dict:
         "change_1d": change_1d,
         "change_5d": change_5d,
         "change_20d": change_20d,
+        "close": float(close.iloc[-1]),
+        "prev_close": float(close.iloc[-2]) if len(close) > 1 else float(close.iloc[-1]),
     }
 
 def ai_score(tech: dict, fund: dict) -> int:
@@ -247,6 +249,54 @@ def ai_score(tech: dict, fund: dict) -> int:
 
     return int(max(0, min(100, round(score))))
 
+
+def smart_money_score(tech: dict) -> int:
+    """
+    Smart Money Score (Proxy Bandarmologi) 0-100
+    Berdasarkan volume anomaly + price action
+    """
+    score = 40.0
+    vol = tech["vol_ratio"]
+    change = tech["change_1d"]
+    change5 = tech["change_5d"]
+
+    # 1. Relative Volume (bobot besar)
+    if vol >= 3.0:
+        score += 25
+    elif vol >= 2.0:
+        score += 18
+    elif vol >= 1.5:
+        score += 12
+    elif vol >= 1.2:
+        score += 6
+    elif vol < 0.6:
+        score -= 10
+
+    # 2. Volume + Price Action (Akumulasi vs Distribusi)
+    if vol >= 1.5 and change > 1.5:
+        score += 18          # Volume tinggi + harga naik kuat → akumulasi
+    elif vol >= 1.5 and change > 0.3:
+        score += 10
+    elif vol >= 1.5 and change < -1.5:
+        score -= 15          # Volume tinggi + harga turun → distribusi
+    elif vol >= 1.5 and change < -0.5:
+        score -= 8
+
+    # 3. Momentum 5 hari mendukung
+    if change5 > 4 and vol >= 1.3:
+        score += 10
+    elif change5 < -5 and vol >= 1.3:
+        score -= 8
+
+    # 4. Harga di atas MA (konfirmasi trend)
+    if tech["price"] > tech["sma20"]:
+        score += 7
+    else:
+        score -= 5
+
+    return int(max(0, min(100, round(score))))
+
+
 def score_color(score: int) -> str:
     if score >= 80:
         return "🟢"
@@ -264,19 +314,24 @@ st.caption(f"AI Stock Screener IDX  •  Update: {datetime.now().strftime('%d %b
 # Sidebar filter
 with st.sidebar:
     st.header("⚙️ Filter")
-    min_score = st.slider("Skor AI minimum", 0, 100, 62, 1)
+    min_score = st.slider("Skor AI minimum", 0, 100, 60, 1)
+    min_smart = st.slider("Smart Money Score minimum", 0, 100, 50, 1)
     only_uptrend = st.checkbox("Hanya yang di atas SMA20", value=True)
     max_show = st.slider("Jumlah saham ditampilkan", 5, 40, 15)
     st.markdown("---")
-    st.markdown("**Keterangan Skor AI**")
+    st.markdown("**Keterangan Skor**")
     st.markdown("""
-    - **80–100** → Sangat menarik  
-    - **70–79** → Menarik  
-    - **60–69** → Cukup  
-    - **< 60** → Lemah  
+    **Skor AI**  
+    - 80–100 → Sangat menarik  
+    - 70–79 → Menarik  
+    
+    **Smart Money Score** (Proxy Bandar)  
+    - 80+ → Indikasi kuat aktivitas besar  
+    - 60–79 → Ada aktivitas volume  
+    - <60 → Volume sepi  
     """)
     st.markdown("---")
-    st.caption("Teknikal: RSI, MACD, MA, Volume, Momentum\nFundamental: PE, PBV, ROE")
+    st.caption("Teknikal + Fundamental + Volume Analysis")
 
 # ====================== TOMBOL SCAN YANG JELAS ======================
 st.markdown("---")
@@ -310,9 +365,13 @@ if scan:
         tech = calculate_indicators(df)
         fund = get_info(ticker)
         score = ai_score(tech, fund)
+        smart = smart_money_score(tech)
 
         # Filter
         if score < min_score:
+            progress.progress((i + 1) / total)
+            continue
+        if smart < min_smart:
             progress.progress((i + 1) / total)
             continue
         if only_uptrend and tech["price"] < tech["sma20"]:
@@ -329,11 +388,12 @@ if scan:
             "Vol": tech["vol_ratio"],
             "PE": fund["pe"],
             "PBV": fund["pb"],
-            "Skor": score,
+            "Skor AI": score,
+            "Smart $": smart,
             "Sektor": (fund["sector"] or "-")[:18],
         })
         progress.progress((i + 1) / total)
-        time.sleep(0.15)  # sedikit delay biar tidak terlalu agresif ke Yahoo
+        time.sleep(0.12)
 
     status.empty()
     progress.empty()
@@ -342,12 +402,12 @@ if scan:
         st.warning("Tidak ada saham yang lolos filter. Coba turunkan skor minimum atau matikan filter uptrend.")
     else:
         df = pd.DataFrame(results)
-        df = df.sort_values("Skor", ascending=False).head(max_show).reset_index(drop=True)
+        df = df.sort_values("Skor AI", ascending=False).head(max_show).reset_index(drop=True)
 
         # Tampilkan top 3 highlight
         st.success(f"✅ Scan selesai! Ditemukan **{len(df)} saham** potensial.")
-        st.markdown("### 🏆 Rekomendasi Saham Potensial (Skor AI Tertinggi)")
-        st.caption("Semakin tinggi skor = semakin menarik secara teknikal & fundamental saat ini")
+        st.markdown("### 🏆 Rekomendasi Saham Potensial")
+        st.caption("Urut berdasarkan Skor AI + mempertimbangkan Smart Money Score")
         
         top_cols = st.columns(min(3, len(df)))
         for idx, col in enumerate(top_cols):
@@ -355,9 +415,9 @@ if scan:
                 row = df.iloc[idx]
                 with col:
                     st.metric(
-                        label=f"{score_color(row['Skor'])} {row['Kode']}",
+                        label=f"{score_color(row['Skor AI'])} {row['Kode']}",
                         value=f"{row['Harga']:,.0f}",
-                        delta=f"{row['5D%']:+.1f}% (5D) | Skor {row['Skor']}"
+                        delta=f"{row['5D%']:+.1f}% | AI:{row['Skor AI']} | SM:{row['Smart $']}"
                     )
 
         st.markdown("---")
@@ -372,7 +432,8 @@ if scan:
         display["Vol"] = display["Vol"].map(lambda x: f"{x:.2f}x")
         display["PE"] = display["PE"].map(lambda x: f"{x:.1f}" if pd.notna(x) else "–")
         display["PBV"] = display["PBV"].map(lambda x: f"{x:.2f}" if pd.notna(x) else "–")
-        display["Skor"] = display["Skor"].map(lambda x: f"{score_color(x)} {x}")
+        display["Skor AI"] = display["Skor AI"].map(lambda x: f"{score_color(x)} {x}")
+        display["Smart $"] = display["Smart $"].map(lambda x: f"{score_color(x)} {x}")
 
         st.dataframe(
             display,
@@ -381,7 +442,8 @@ if scan:
             column_config={
                 "Kode": st.column_config.TextColumn("Kode", width="small"),
                 "Nama": st.column_config.TextColumn("Nama", width="medium"),
-                "Skor": st.column_config.TextColumn("Skor AI", width="small"),
+                "Skor AI": st.column_config.TextColumn("Skor AI", width="small"),
+                "Smart $": st.column_config.TextColumn("Smart $", width="small"),
             }
         )
 
@@ -399,16 +461,16 @@ else:
     st.info("👆 Tekan tombol **🚀 SCAN SAHAM SEKARANG** di atas untuk memulai.")
     st.markdown("""
     ### Cara kerja AimnismeSaham
-    1. Mengambil data harga 6 bulan terakhir dari Yahoo Finance  
-    2. Menghitung indikator teknikal (RSI, MACD, SMA, Volume)  
-    3. Mengambil data fundamental (PE, PBV, ROE)  
-    4. Memberikan **Skor AI 0–100**  
-    5. Menampilkan saham dengan skor tertinggi sebagai **Rekomendasi**
+    1. Ambil data harga 6 bulan terakhir  
+    2. Hitung indikator teknikal (RSI, MACD, SMA, Volume)  
+    3. Ambil data fundamental (PE, PBV, ROE)  
+    4. Hitung **Skor AI** + **Smart Money Score** (proxy bandarmologi)  
+    5. Tampilkan saham dengan skor tertinggi
 
     **Tips:**
-    - Jalankan setelah jam **16:00 WIB** (setelah market tutup)
-    - Skor **80+** = menarik | **90+** = sangat menarik
-    - Ini tool bantu analisa, **bukan** jaminan naik
+    - Jalankan setelah jam **16:00 WIB**
+    - Skor AI **80+** + Smart Money **70+** = lebih menarik
+    - Smart Money Score = indikasi aktivitas volume besar (bukan data broker asli)
     """)
 
 st.markdown("---")
