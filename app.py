@@ -40,17 +40,34 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ====================== DAFTAR SAHAM ======================
-# LQ45 + beberapa saham likuid tambahan
+# ±130 saham likuid IDX (LQ45 + IDX80 + saham aktif lainnya)
 TICKERS = [
-    "BBCA.JK", "BBRI.JK", "BMRI.JK", "BBNI.JK", "BBTN.JK",
-    "TLKM.JK", "ASII.JK", "UNTR.JK", "ANTM.JK", "ADRO.JK",
-    "PTBA.JK", "ICBP.JK", "INDF.JK", "KLBF.JK", "CPIN.JK",
-    "AMRT.JK", "GOTO.JK", "AMMN.JK", "MDKA.JK", "BRPT.JK",
-    "EXCL.JK", "PGAS.JK", "SMGR.JK", "INTP.JK", "JSMR.JK",
-    "TBIG.JK", "ACES.JK", "MAPI.JK", "HRUM.JK", "ITMG.JK",
-    "MEDC.JK", "ESSA.JK", "INKP.JK", "TKIM.JK", "JPFA.JK",
-    "SIDO.JK", "UNVR.JK", "GGRM.JK", "HMSP.JK", "BRIS.JK",
-    "BUMI.JK", "INCO.JK", "TPIA.JK", "BYAN.JK", "CUAN.JK"
+    # Banking
+    "BBCA.JK", "BBRI.JK", "BMRI.JK", "BBNI.JK", "BBTN.JK", "BRIS.JK", "BJTM.JK", "BJBR.JK", "PNBN.JK", "BDMN.JK",
+    # Telco & Media
+    "TLKM.JK", "EXCL.JK", "ISAT.JK", "TBIG.JK", "TOWR.JK", "MTEL.JK", "EMTK.JK", "MNCN.JK", "SCMA.JK",
+    # Consumer & Retail
+    "ICBP.JK", "INDF.JK", "UNVR.JK", "MYOR.JK", "GGRM.JK", "HMSP.JK", "KLBF.JK", "SIDO.JK", "KAEF.JK",
+    "AMRT.JK", "MAPI.JK", "ACES.JK", "LPPF.JK", "RALS.JK", "ERAA.JK", "MAPA.JK", "MIDI.JK",
+    # Automotive & Industrial
+    "ASII.JK", "UNTR.JK", "AUTO.JK", "IMAS.JK", "GJTL.JK", "INDS.JK", "SMSM.JK",
+    # Mining & Energy
+    "ADRO.JK", "PTBA.JK", "ITMG.JK", "HRUM.JK", "BUMI.JK", "DOID.JK", "PTRO.JK", "DEWA.JK",
+    "ANTM.JK", "INCO.JK", "MDKA.JK", "TINS.JK", "PSAB.JK", "BRMS.JK",
+    "AMMN.JK", "CUAN.JK", "MBMA.JK", "NCKL.JK", "NICL.JK",
+    "MEDC.JK", "ENRG.JK", "ELSA.JK", "AKRA.JK", "PGAS.JK",
+    # Plantation & Agri
+    "AALI.JK", "LSIP.JK", "SIMP.JK", "SSMS.JK", "PALM.JK", "DSNG.JK", "JAWA.JK", "TAPG.JK",
+    "CPIN.JK", "JPFA.JK", "MAIN.JK", "WIIM.JK",
+    # Property & Construction
+    "BSDE.JK", "CTRA.JK", "PWON.JK", "SMRA.JK", "DMAS.JK", "APLN.JK", "ASRI.JK",
+    "WIKA.JK", "WSKT.JK", "PTPP.JK", "ADHI.JK", "JKON.JK", "TOTL.JK",
+    # Cement & Basic
+    "SMGR.JK", "INTP.JK", "SMCB.JK", "BRPT.JK", "TPIA.JK", "FPNI.JK", "INKP.JK", "TKIM.JK",
+    # Others / Active
+    "GOTO.JK", "BUKA.JK", "EMTK.JK", "WIFI.JK", "JSMR.JK", "BIRD.JK", "BULL.JK",
+    "ESSA.JK", "BYAN.JK", "SGER.JK", "PGEO.JK", "KEJU.JK", "SRTG.JK", "BBHI.JK",
+    "HEAL.JK", "MIKA.JK", "SILO.JK", "SRAJ.JK", "SAME.JK"
 ]
 
 # ====================== FUNGSI DATA ======================
@@ -309,7 +326,7 @@ def score_color(score: int) -> str:
 
 # ====================== UI ======================
 st.title("📈 AimnismeSaham")
-st.caption(f"AI Stock Screener IDX  •  Update: {datetime.now().strftime('%d %b %Y • %H:%M')} WIB  •  Data: Yahoo Finance  •  Bukan saran investasi")
+st.caption(f"AI Stock Screener IDX (±130 saham likuid)  •  Update: {datetime.now().strftime('%d %b %Y • %H:%M')} WIB  •  Data: Yahoo Finance  •  Bukan saran investasi")
 
 # Sidebar filter
 with st.sidebar:
