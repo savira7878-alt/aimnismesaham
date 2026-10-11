@@ -365,6 +365,67 @@ def score_color(score: int) -> str:
         return "⚪"
 
 
+def get_recommendation(score: int, smart: int, tech: dict, ihsg_status: str) -> dict:
+    """Tentukan Recommended Action mirip STOCKS.LY"""
+    price = tech["price"]
+    sma20 = tech["sma20"]
+    sma50 = tech["sma50"]
+    rsi = tech["rsi"]
+    vol = tech["vol_ratio"]
+    atr_pct = (tech["atr"] / price * 100) if price > 0 else 0
+
+    # Kondisi harga
+    price_above_ma20 = price > sma20
+    ma20_above_ma50 = sma20 > sma50
+    vol_ok = vol >= 0.8
+    atr_ok = atr_pct < 8  # volatilitas tidak ekstrem
+
+    conditions_ok = sum([price_above_ma20, ma20_above_ma50, vol_ok, atr_ok])
+
+    # Decision logic
+    if score >= 82 and smart >= 70 and price_above_ma20 and ihsg_status != "Bearish":
+        action = "BUY"
+        color = "green"
+        reason = "Skor AI & Smart Money kuat, tren naik, kondisi harga mendukung."
+    elif score >= 70 and smart >= 55 and price_above_ma20:
+        action = "WATCHLIST"
+        color = "orange"
+        reason = "Menarik, tapi tunggu konfirmasi volume atau pullback ke Entry Zone."
+    elif score >= 60 or smart >= 50:
+        action = "WAIT"
+        color = "gray"
+        reason = "Timing belum optimal atau sinyal masih campuran. Pantau dulu."
+    else:
+        action = "AVOID"
+        color = "red"
+        reason = "Skor rendah / tren lemah. Hindari untuk sementara."
+
+    # Risk level 1-5
+    risk = 3
+    if score >= 80 and smart >= 70 and price_above_ma20:
+        risk = 2  # lebih terkendali
+    if not price_above_ma20 or atr_pct > 7 or rsi > 75:
+        risk = 4
+    if score < 55 or (ihsg_status == "Bearish" and not price_above_ma20):
+        risk = 5
+
+    risk_label = {1: "SANGAT TERKENDALI", 2: "TERKENDALI", 3: "NETRAL", 4: "BERISIKO", 5: "SANGAT BERISIKO"}
+
+    return {
+        "action": action,
+        "color": color,
+        "reason": reason,
+        "risk": risk,
+        "risk_label": risk_label.get(risk, "NETRAL"),
+        "price_above_ma20": price_above_ma20,
+        "ma20_above_ma50": ma20_above_ma50,
+        "vol_ok": vol_ok,
+        "atr_ok": atr_ok,
+        "atr_pct": atr_pct,
+        "conditions_ok": conditions_ok,
+    }
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_ihsg_trend():
     """Cek tren IHSG sederhana"""
@@ -398,7 +459,7 @@ def get_ihsg_trend():
 
 # ====================== UI ======================
 st.title("📈 AimnismeSaham")
-st.caption(f"AI Stock Screener IDX (±130 saham likuid)  •  Update: {datetime.now().strftime('%d %b %Y • %H:%M')} WIB  •  Data: Yahoo Finance  •  Bukan saran investasi")
+st.caption(f"AI Stock Screener IDX  •  {datetime.now().strftime('%d %b %Y • %H:%M')} WIB  •  Yahoo Finance  •  Bukan saran investasi")
 
 # Sidebar filter
 with st.sidebar:
@@ -430,21 +491,35 @@ scan = st.button(
     help="Klik untuk memulai analisa seluruh saham"
 )
 
-st.caption("Proses scan membutuhkan 30–60 detik. Mohon tunggu sampai selesai.")
+st.caption("Quick Scan ±40 detik | Full Scan 2–4 menit. Jangan tutup halaman saat proses berjalan.")
+
+# Pilihan mode scan
+scan_mode = st.radio(
+    "Mode Scan:",
+    ["⚡ Quick Scan (40 saham paling likuid)", "🔍 Full Scan (semua ±120 saham)"],
+    horizontal=True,
+    index=0
+)
 
 if scan:
     # Cek tren IHSG dulu
     ihsg = get_ihsg_trend()
     
     if respect_ihsg and ihsg["status"] == "Bearish":
-        st.warning(f"⚠️ **IHSG sedang Bearish** (5D: {ihsg['change_5d']:+.1f}%). Rekomendasi dibatasi. Pertimbangkan tunggu market membaik.")
+        st.warning(f"⚠️ **IHSG sedang Bearish** (5D: {ihsg['change_5d']:+.1f}%). Rekomendasi dibatasi.")
     
+    # Pilih daftar ticker sesuai mode
+    if "Quick" in scan_mode:
+        scan_list = TICKERS[:42]   # 42 saham paling likuid di awal list
+    else:
+        scan_list = TICKERS
+
     results = []
     progress = st.progress(0)
     status = st.empty()
 
-    total = len(TICKERS)
-    for i, ticker in enumerate(TICKERS):
+    total = len(scan_list)
+    for i, ticker in enumerate(scan_list):
         kode = ticker.replace(".JK", "")
         status.markdown(f"**Scanning** `{kode}`  ({i+1}/{total})")
         
@@ -454,28 +529,32 @@ if scan:
             continue
 
         tech = calculate_indicators(df)
-        fund = get_info(ticker)
-        score = ai_score(tech, fund)
         smart = smart_money_score(tech)
 
-        # Filter
-        if score < min_score:
+        # Filter teknis dulu (cepat) — baru ambil fundamental kalau lolos
+        if only_uptrend and tech["price"] < tech["sma20"]:
             progress.progress((i + 1) / total)
             continue
         if smart < min_smart:
             progress.progress((i + 1) / total)
             continue
-        if only_uptrend and tech["price"] < tech["sma20"]:
+
+        # Ambil fundamental hanya untuk kandidat yang sudah lolos filter volume/trend
+        fund = get_info(ticker)
+        score = ai_score(tech, fund)
+
+        if score < min_score:
             progress.progress((i + 1) / total)
             continue
-        # Jika IHSG bearish dan user aktifkan filter, naikkan standar skor
         if respect_ihsg and ihsg["status"] == "Bearish" and score < 75:
             progress.progress((i + 1) / total)
             continue
 
+        rec = get_recommendation(score, smart, tech, ihsg["status"])
+
         results.append({
             "Kode": kode,
-            "Nama": fund["name"][:22],
+            "Nama": fund["name"][:28],
             "Harga": tech["price"],
             "1D%": tech["change_1d"],
             "5D%": tech["change_5d"],
@@ -489,9 +568,24 @@ if scan:
             "SL": tech["stop_loss"],
             "TP1": tech["tp1"],
             "TP2": tech["tp2"],
+            "PE": fund.get("pe"),
+            "PBV": fund.get("pb"),
+            "ROE": fund.get("roe"),
+            "Sektor": fund.get("sector") or "-",
+            "Action": rec["action"],
+            "Reason": rec["reason"],
+            "Risk": rec["risk"],
+            "RiskLabel": rec["risk_label"],
+            "ATRpct": rec["atr_pct"],
+            "Price>MA20": rec["price_above_ma20"],
+            "MA20>MA50": rec["ma20_above_ma50"],
+            "VolOK": rec["vol_ok"],
+            "ATROK": rec["atr_ok"],
+            "CondOK": rec["conditions_ok"],
+            "SMA20": tech["sma20"],
+            "SMA50": tech["sma50"],
         })
         progress.progress((i + 1) / total)
-        time.sleep(0.10)
 
     status.empty()
     progress.empty()
@@ -509,56 +603,126 @@ if scan:
 
         st.success(f"✅ Scan selesai! Ditemukan **{len(df)} saham** potensial.")
         st.markdown("### 🏆 Rekomendasi Saham Potensial")
-        st.caption("Urut berdasarkan Skor AI • Dilengkapi Entry Zone, SL & TP")
-        
+        st.caption("Urut berdasarkan Skor AI • Dilengkapi Keputusan Strategi, Entry Zone, SL & TP")
+
+        # ===== TOP 3 CARDS =====
         top_cols = st.columns(min(3, len(df)))
         for idx, col in enumerate(top_cols):
             if idx < len(df):
                 row = df.iloc[idx]
+                action = row["Action"]
+                action_emoji = {"BUY": "🟢 BUY", "WATCHLIST": "🟡 WATCHLIST", "WAIT": "⚪ WAIT", "AVOID": "🔴 AVOID"}.get(action, action)
                 with col:
-                    st.metric(
-                        label=f"{score_color(row['Skor AI'])} {row['Kode']}",
-                        value=f"{row['Harga']:,.0f}",
-                        delta=f"AI:{row['Skor AI']} | SM:{row['Smart $']}"
-                    )
+                    st.markdown(f"### {score_color(row['Skor AI'])} {row['Kode']}")
+                    st.metric("Harga", f"{row['Harga']:,.0f}", delta=f"{row['5D%']:+.1f}% (5D)")
+                    st.markdown(f"**{action_emoji}**")
+                    st.caption(f"AI {row['Skor AI']} | Smart {row['Smart $']} | Risk: {row['RiskLabel']}")
                     st.caption(f"Entry: {row['Entry']}")
-                    st.caption(f"SL: {row['SL']:,.0f} | TP1: {row['TP1']:,.0f}")
+                    st.caption(f"SL: {row['SL']:,.0f} → TP1: {row['TP1']:,.0f}")
 
         st.markdown("---")
-        st.markdown(f"### 📋 Daftar Lengkap + Level Trading ({len(df)} saham)")
 
-        # Format tabel
-        display = df.copy()
+        # ===== DETAIL ANALISIS (mirip STOCKS.LY) =====
+        st.markdown("### 📊 Detail Analisis per Saham")
+        st.caption("Klik expander untuk melihat Ringkasan Strategi, Kondisi Harga, Entry Area & Keputusan")
+
+        for idx, row in df.iterrows():
+            action = row["Action"]
+            action_color = {"BUY": "green", "WATCHLIST": "orange", "WAIT": "gray", "AVOID": "red"}.get(action, "gray")
+            with st.expander(f"{score_color(row['Skor AI'])} **{row['Kode']}** — {row['Nama']}  |  {action}", expanded=(idx == 0)):
+                
+                # Header
+                c1, c2, c3 = st.columns([2, 1, 1])
+                with c1:
+                    st.markdown(f"**{row['Nama']}**")
+                    st.caption(f"Sektor: {row['Sektor']}")
+                with c2:
+                    st.metric("Skor AI", f"{row['Skor AI']}")
+                with c3:
+                    st.metric("Smart Money", f"{row['Smart $']}")
+
+                st.markdown("---")
+
+                # Ringkasan Strategi + Kondisi Harga
+                colA, colB = st.columns(2)
+
+                with colA:
+                    st.markdown("#### ⚡ Ringkasan Strategi")
+                    pe_txt = f"{row['PE']:.1f}x" if pd.notna(row['PE']) else "–"
+                    roe_txt = f"{row['ROE']*100:.1f}%" if pd.notna(row['ROE']) and row['ROE'] is not None else "–"
+                    st.write(f"**Fundamental:** PE {pe_txt} | ROE {roe_txt}")
+                    st.write(f"**Smart Money Zone:** {'Kuat' if row['Smart $'] >= 70 else ('Sedang' if row['Smart $'] >= 50 else 'Lemah')}")
+                    st.write(f"**Signal Reliability:** {'High' if row['Skor AI'] >= 80 and row['Smart $'] >= 65 else 'Medium' if row['Skor AI'] >= 65 else 'Low'}")
+                    
+                    # Risk bar sederhana
+                    risk = int(row["Risk"])
+                    risk_colors = ["🟢", "🟢", "🟡", "🟠", "🔴"]
+                    st.write(f"**Risiko:** {risk_colors[risk-1]} {row['RiskLabel']} ({risk}/5)")
+
+                with colB:
+                    st.markdown("#### 📈 Kondisi Harga Saat Ini")
+                    st.write(f"**Last Price:** {row['Harga']:,.0f}")
+                    st.write(f"**Volatility (ATR):** {row['ATRpct']:.1f}%")
+                    st.write(f"**MA20:** {row['SMA20']:,.0f} | **MA50:** {row['SMA50']:,.0f}")
+                    
+                    badges = []
+                    badges.append("✅ Price > MA20" if row["Price>MA20"] else "❌ Price < MA20")
+                    badges.append("✅ MA20 > MA50" if row["MA20>MA50"] else "❌ MA20 < MA50")
+                    badges.append("✅ Volatility OK" if row["ATROK"] else "⚠️ Volatility Tinggi")
+                    badges.append("✅ Liquidity OK" if row["VolOK"] else "⚠️ Volume Sepi")
+                    st.write(" • ".join(badges))
+                    
+                    suitable = "SUITABLE" if row["CondOK"] >= 3 and row["Action"] in ["BUY", "WATCHLIST"] else "NOT SUITABLE"
+                    st.markdown(f"**Status:** `{suitable}`")
+
+                st.markdown("---")
+
+                # Entry Area + Keputusan
+                colC, colD = st.columns(2)
+                with colC:
+                    st.markdown("#### 🎯 Entry Area")
+                    if action == "AVOID":
+                        st.error("HINDARI EMITEN INI untuk sementara")
+                        st.caption("Skor atau kondisi belum mendukung entry.")
+                    elif action == "WAIT":
+                        st.warning("Belum ada sinyal entry yang kuat")
+                        st.caption(f"Pantau zona {row['Entry']}")
+                    else:
+                        st.success(f"Entry Zone: **{row['Entry']}**")
+                        st.caption(f"Support: {row['Support']:,.0f} | Resistance: {row['Resistance']:,.0f}")
+                        st.write(f"SL: **{row['SL']:,.0f}** | TP1: **{row['TP1']:,.0f}** | TP2: **{row['TP2']:,.0f}**")
+
+                with colD:
+                    st.markdown("#### 📋 Keputusan Strategi")
+                    if action == "BUY":
+                        st.success(f"**RECOMMENDED ACTION: BUY**")
+                    elif action == "WATCHLIST":
+                        st.warning(f"**RECOMMENDED ACTION: WATCHLIST**")
+                    elif action == "WAIT":
+                        st.info(f"**RECOMMENDED ACTION: WAIT**")
+                    else:
+                        st.error(f"**RECOMMENDED ACTION: AVOID**")
+                    st.write(row["Reason"])
+
+                st.caption("⚠️ Data Bandar Flow & Dana Asing asli tidak tersedia secara gratis. Smart Money Score adalah proxy berbasis volume.")
+
+        st.markdown("---")
+        st.markdown(f"### 📋 Tabel Ringkas ({len(df)} saham)")
+
+        # Tabel ringkas
+        show_cols = ["Kode", "Nama", "Harga", "5D%", "Skor AI", "Smart $", "Action", "Entry", "SL", "TP1"]
+        display = df[show_cols].copy()
         display["Harga"] = display["Harga"].map(lambda x: f"{x:,.0f}")
-        display["1D%"] = display["1D%"].map(lambda x: f"{x:+.2f}")
-        display["5D%"] = display["5D%"].map(lambda x: f"{x:+.2f}")
-        display["RSI"] = display["RSI"].map(lambda x: f"{x:.1f}")
-        display["Vol"] = display["Vol"].map(lambda x: f"{x:.2f}x")
-        display["Skor AI"] = display["Skor AI"].map(lambda x: f"{score_color(x)} {x}")
-        display["Smart $"] = display["Smart $"].map(lambda x: f"{score_color(x)} {x}")
-        display["Support"] = display["Support"].map(lambda x: f"{x:,.0f}")
-        display["Resistance"] = display["Resistance"].map(lambda x: f"{x:,.0f}")
+        display["5D%"] = display["5D%"].map(lambda x: f"{x:+.1f}%")
         display["SL"] = display["SL"].map(lambda x: f"{x:,.0f}")
         display["TP1"] = display["TP1"].map(lambda x: f"{x:,.0f}")
-        display["TP2"] = display["TP2"].map(lambda x: f"{x:,.0f}")
 
-        st.dataframe(
-            display,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Kode": st.column_config.TextColumn("Kode", width="small"),
-                "Nama": st.column_config.TextColumn("Nama", width="medium"),
-                "Skor AI": st.column_config.TextColumn("AI", width="small"),
-                "Smart $": st.column_config.TextColumn("SM", width="small"),
-                "Entry": st.column_config.TextColumn("Entry Zone", width="small"),
-            }
-        )
+        st.dataframe(display, use_container_width=True, hide_index=True)
 
-        # Download CSV
+        # Download
         csv = df.to_csv(index=False).encode("utf-8")
         st.download_button(
-            "⬇️ Download hasil (CSV)",
+            "⬇️ Download hasil lengkap (CSV)",
             csv,
             file_name=f"aimnismesaham_scan_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
             mime="text/csv",
@@ -568,19 +732,17 @@ if scan:
 else:
     st.info("👆 Tekan tombol **🚀 SCAN SAHAM SEKARANG** di atas untuk memulai.")
     st.markdown("""
-    ### Fitur AimnismeSaham Sekarang
-    1. **Skor AI** (Teknikal + Fundamental)
-    2. **Smart Money Score** (proxy volume / bandar)
-    3. **Support & Resistance** + Entry Zone
-    4. **Stop Loss & Take Profit** (berdasarkan ATR)
-    5. **Filter tren IHSG** (hindari open saat market bearish)
+    ### Fitur AimnismeSaham (terinspirasi STOCKS.LY)
+    1. **Skor AI** + **Smart Money Score**
+    2. **Recommended Action** → BUY / WATCHLIST / WAIT / AVOID
+    3. **Ringkasan Strategi** (Fundamental + Risk Level)
+    4. **Kondisi Harga** (Price vs MA, Volatility, Liquidity)
+    5. **Entry Area** + Support / Resistance + SL & TP
+    6. **Filter tren IHSG**
 
-    **Cara pakai terbaik:**
-    - Scan setelah jam 16:00 WIB
-    - Pilih saham Skor AI ≥ 80 + Smart Money ≥ 70
-    - Entry di zona yang disarankan
-    - Pasang SL sesuai saran
-    - Jangan force open kalau IHSG sedang Bearish
+    **Catatan:**  
+    Data Bandar Flow & Dana Asing asli **tidak tersedia gratis**.  
+    Smart Money Score adalah **proxy** berbasis volume & price action.
     """)
 
 st.markdown("---")
