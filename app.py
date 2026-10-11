@@ -458,7 +458,7 @@ def get_ihsg_trend():
         return {"status": "Unknown", "change_5d": 0, "above_ma": True, "price": 0}
 
 # ====================== UI ======================
-st.title("📈 AimnStock")
+st.title("📈 AimStock")
 st.caption(f"AI Stock Screener IDX  •  {datetime.now().strftime('%d %b %Y • %H:%M')} WIB  •  Yahoo Finance  •  Bukan saran investasi")
 
 # Sidebar filter
