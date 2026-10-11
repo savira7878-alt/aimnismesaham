@@ -14,7 +14,7 @@ except ImportError:
     HAS_TA = False
 
 st.set_page_config(
-    page_title="AimnismeSaham — AI Stock Screener",
+    page_title="AimStock — AI Stock Screener",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -366,7 +366,7 @@ def score_color(score: int) -> str:
 
 
 def get_recommendation(score: int, smart: int, tech: dict, ihsg_status: str) -> dict:
-    """Tentukan Recommended Action mirip STOCKS.LY"""
+    """Tentukan Recommended Action"""
     price = tech["price"]
     sma20 = tech["sma20"]
     sma50 = tech["sma50"]
@@ -458,7 +458,7 @@ def get_ihsg_trend():
         return {"status": "Unknown", "change_5d": 0, "above_ma": True, "price": 0}
 
 # ====================== UI ======================
-st.title("📈 AimnismeSaham")
+st.title("📈 AimnStock")
 st.caption(f"AI Stock Screener IDX  •  {datetime.now().strftime('%d %b %Y • %H:%M')} WIB  •  Yahoo Finance  •  Bukan saran investasi")
 
 # Sidebar filter
@@ -622,7 +622,7 @@ if scan:
 
         st.markdown("---")
 
-        # ===== DETAIL ANALISIS (mirip STOCKS.LY) =====
+        # ===== DETAIL ANALISIS =====
         st.markdown("### 📊 Detail Analisis per Saham")
         st.caption("Klik expander untuk melihat Ringkasan Strategi, Kondisi Harga, Entry Area & Keputusan")
 
@@ -724,7 +724,7 @@ if scan:
         st.download_button(
             "⬇️ Download hasil lengkap (CSV)",
             csv,
-            file_name=f"aimnismesaham_scan_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            file_name=f"aimstock_scan_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
             mime="text/csv",
             use_container_width=True
         )
@@ -732,7 +732,7 @@ if scan:
 else:
     st.info("👆 Tekan tombol **🚀 SCAN SAHAM SEKARANG** di atas untuk memulai.")
     st.markdown("""
-    ### Fitur AimnismeSaham (terinspirasi STOCKS.LY)
+    ### Fitur AimStock
     1. **Skor AI** + **Smart Money Score**
     2. **Recommended Action** → BUY / WATCHLIST / WAIT / AVOID
     3. **Ringkasan Strategi** (Fundamental + Risk Level)
